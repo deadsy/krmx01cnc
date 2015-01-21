@@ -1,9 +1,17 @@
 #! /usr/bin/python
 #------------------------------------------------------------------------------
+"""
 
+convert - convert a gcode file to a more readable form.
+
+"""
+#------------------------------------------------------------------------------
+
+import getopt
 import sys
 
-comments = False
+_comments = False
+_infile = ''
 
 #------------------------------------------------------------------------------
 # scanner
@@ -16,6 +24,7 @@ tokens = (
   'INTEGER',
   'DECIMAL',
   'COMMENT',
+  'NEWLINE',
 )
 
 t_A = r'A|a'
@@ -48,17 +57,17 @@ t_Z = r'Z|z'
 t_INTEGER = r'\d+'
 t_DECIMAL = r'[+-]*\d*\.\d*'
 
+def t_NEWLINE(t):
+  r'\r\n|\n'
+  t.lexer.lineno += len(t.value)
+  return t
+
 def t_COMMENT(t):
-  r'\(.*\)|[;%].*'
-  pass
+  r'\([^\)\n]*\)|[;%].*'
+  return None
 
 # A string containing ignored characters (spaces and tabs)
-t_ignore  = ' \r\t'
-
-# Define a rule so we can track line numbers
-def t_newline(t):
-  r'\n'
-  t.lexer.lineno += len(t.value)
+t_ignore  = ' \t'
 
 # Error handling rule
 def t_error(t):
@@ -79,11 +88,12 @@ def p_lines(p):
   pass
 
 def p_line(p):
-  '''line : line_number words
-          | words'''
-  if len(p) == 3:
+  '''line : line_number words NEWLINE
+          | words NEWLINE
+          | NEWLINE'''
+  if len(p) == 4:
     print p[2]
-  if len(p) == 2:
+  if len(p) == 3:
     print p[1]
 
 def p_words(p):
@@ -127,13 +137,14 @@ def p_general_function(p):
   description = {
     '00': 'rapid move',
     '01': 'linear move',
+    '02': 'clockwise arc',
+    '03': 'counterclockwise arc',
     '17': 'xy plane',
     '20': 'use inches',
     '21': 'use mm',
     '40': 'cutter compensation off',
     '43': 'tool length offset',
     '49': 'cancel tool length compensation',
-    '70': '??',
     '80': 'cancel canned cycle',
     '90': 'abs distance',
     '91': 'inc distance',
@@ -141,14 +152,15 @@ def p_general_function(p):
     '94': 'feed units/min',
     '95': 'feed units/rev',
   }
-  if comments and description.has_key(p[2]):
-    p[0] = 'g%s (%s)' % (p[2], description[p[2]])
+  code = '%02d' % int(p[2])
+  if _comments:
+    p[0] = 'g%s (%s)' % (code, description.get(code, '?'))
   else:
-    p[0] = 'g%s' % p[2]
+    p[0] = 'g%s' % code
 
 def p_tool_selection(p):
   'tool_selection : T INTEGER'
-  if comments:
+  if _comments:
     p[0] = 't%s (select tool)' % p[2]
   else:
     p[0] = 't%s' % p[2]
@@ -162,8 +174,8 @@ def p_misc_function(p):
     '09': 'coolant off',
     '30': 'program end',
   }
-  if comments and description.has_key(p[2]):
-    p[0] = 'm%s (%s)' % (p[2], description[p[2]])
+  if _comments:
+    p[0] = 'm%s (%s)' % (p[2], description.get(p[2], '?'))
   else:
     p[0] = 'm%s' % p[2]
 
@@ -177,7 +189,7 @@ def p_spindle_speed(p):
 
 def p_tool_length_offset_index(p):
   'tool_length_offset_index : H INTEGER'
-  if comments:
+  if _comments:
     p[0] = 'h%s (tool length offset index)' % p[2]
   else:
     p[0] = 'h%s' % p[2]
@@ -261,21 +273,53 @@ def scan(x):
       break
     print tok
 
+#-----------------------------------------------------------------------------
+
+def Print_Usage(argv):
+    print 'Usage: %s [options]' % argv[0]
+    print 'Options:'
+    print '%-15s%s' % ('-i <file>', 'specify input <file>')
+    print '%-15s%s' % ('-c', 'comments on')
+
+def error(msg, usage = False):
+    print msg
+    if usage:
+        Print_Usage(sys.argv)
+    sys.exit(1)
+
 #------------------------------------------------------------------------------
 
-def usage():
-  print "usage: convert.py <filename>"
-  sys.exit(0)
+def Process_Options(argv):
+  """process command line options"""
+  global _infile, _comments
+  try:
+    (opts, args) = getopt.getopt(sys.argv[1:], 'i:c')
+  except getopt.GetoptError, err:
+    error(str(err), True)
+  if args:
+    error('invalid arguments on command line', True)
+  for (opt, val) in opts:
+    if opt == '-i':
+      _infile = val
+    elif opt == '-c':
+      _comments = True
+
+  # cleanup the arguments
+  if not _infile:
+    error('must specify -i <file>', True)
 
 #------------------------------------------------------------------------------
 
 def main():
 
-  if len(sys.argv) < 2:
-    usage()
-  f = open(sys.argv[1], 'r')
+  Process_Options(sys.argv)
+  f = open(_infile, 'r')
   x = f.read()
   f.close()
+
+  #scan(x)
+  #sys.exit(0)
+
   parser.parse(x)
   sys.exit(0)
 
